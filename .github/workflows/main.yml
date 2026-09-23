@@ -9,231 +9,97 @@ jobs:
     timeout-minutes: 60
 
     steps:
-
       - name: Configure Windows RDP
         shell: powershell
         run: |
-          Write-Host "========================================"
+          Write-Host "======================================"
           Write-Host "       CONFIGURING WINDOWS RDP"
-          Write-Host "========================================"
+          Write-Host "======================================"
 
-          # Enable Remote Desktop
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0 `
             -Force
 
-          # Require Network Level Authentication
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name "UserAuthentication" `
             -Value 1 `
             -Force
 
-          # Enable Windows Firewall rules for RDP
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop"
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-          # Make sure Remote Desktop service is running
-          Set-Service `
-            -Name "TermService" `
-            -StartupType Automatic
+          Set-Service -Name "TermService" -StartupType Automatic
+          Start-Service -Name "TermService"
 
-          Start-Service `
-            -Name "TermService" `
-            -ErrorAction SilentlyContinue
-
-          Write-Host ""
           Write-Host "RDP configuration completed."
 
-      - name: Create ATP RDP User
+      - name: Create RDP User
         shell: powershell
         run: |
-          Write-Host "========================================"
-          Write-Host "          CREATING RDP USER"
-          Write-Host "========================================"
-
           $username = "atp"
 
-          # Generate random 20-character password
-          $characters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*"
+          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+          $password = -join (1..20 | ForEach-Object {
+              $chars[(Get-Random -Maximum $chars.Length)]
+          })
 
-          $password = -join (
-            1..20 | ForEach-Object {
-              $characters[
-                (Get-Random -Minimum 0 -Maximum $characters.Length)
-              ]
-            }
-          )
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
 
-          $securePassword = ConvertTo-SecureString `
-            $password `
-            -AsPlainText `
-            -Force
-
-          $existingUser = Get-LocalUser `
-            -Name $username `
-            -ErrorAction SilentlyContinue
-
-          if ($existingUser) {
-
-            Write-Host "User 'atp' already exists."
-
-            Set-LocalUser `
-              -Name $username `
-              -Password $securePassword
-
-          } else {
-
-            Write-Host "Creating user 'atp'..."
-
-            New-LocalUser `
-              -Name $username `
-              -Password $securePassword `
-              -FullName "ATP RDP User" `
-              -Description "Temporary RDP test user"
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              Remove-LocalUser -Name $username
           }
-
-          # Add user to Administrators
-          Add-LocalGroupMember `
-            -Group "Administrators" `
-            -Member $username `
-            -ErrorAction SilentlyContinue
-
-          # Add user to Remote Desktop Users
-          Add-LocalGroupMember `
-            -Group "Remote Desktop Users" `
-            -Member $username `
-            -ErrorAction SilentlyContinue
-
-          # Store credentials for later steps
-          "RDP_USERNAME=$username" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Append `
-              -Encoding utf8
-
-name: ATP RDP Test
-
-on:
-  workflow_dispatch:
-
-jobs:
-  rdp-test:
-    runs-on: windows-latest
-
-    steps:
-      - name: Create RDP
-        shell: powershell
-        run: |
-          Write-Host "Starting Windows RDP configuration..."
-
-          Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-            -Name "fDenyTSConnections" `
-            -Value 0 `
-            -Force
-
-          Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
-            -Name "UserAuthentication" `
-            -Value 1 `
-            -Force
-
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop"
-
-          Set-Service `
-            -Name "TermService" `
-            -StartupType Automatic
-
-          Start-Service `
-            -Name "TermService"
-
-          Write-Host "RDP configuration finished."
-
-      - name: Create ATP User
-        shell: powershell
-        run: |
-          $username = "atp"
-
-          $characters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*"
-
-          $password = -join (
-            1..20 | ForEach-Object {
-              $characters[(Get-Random -Maximum $characters.Length)]
-            }
-          )
-
-          $securePassword = ConvertTo-SecureString `
-            $password `
-            -AsPlainText `
-            -Force
 
           New-LocalUser `
             -Name $username `
             -Password $securePassword `
-            -FullName "ATP RDP User" `
-            -Description "Temporary RDP user"
+            -PasswordNeverExpires:$true `
+            -AccountNeverExpires:$true
 
-          Add-LocalGroupMember `
-            -Group "Administrators" `
-            -Member $username
+          Add-LocalGroupMember -Group "Administrators" -Member $username
 
-          Add-LocalGroupMember `
-            -Group "Remote Desktop Users" `
-            -Member $username
+          "RDP_USERNAME=$username" >> $env:GITHUB_ENV
+          "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-          Write-Host ""
-          Write-Host "================================"
-          Write-Host "RDP USER CREATED"
-          Write-Host "================================"
-          Write-Host "Username: $username"
-          Write-Host "Password: $password"
-          Write-Host "================================"
+          Write-Host "RDP user created."
 
       - name: Verify RDP
         shell: powershell
         run: |
-          $service = Get-Service -Name "TermService"
+          Write-Host "======================================"
+          Write-Host "          VERIFYING RDP"
+          Write-Host "======================================"
 
-          Write-Host "RDP Service: $($service.Status)"
+          Get-Service TermService
 
-          if ($service.Status -ne "Running") {
-            Write-Error "RDP service is not running."
-            exit 1
-          }
-
-          $listener = Get-NetTCPConnection `
+          $rdpPort = Get-NetTCPConnection `
             -LocalPort 3389 `
             -State Listen `
             -ErrorAction SilentlyContinue
 
-          if (-not $listener) {
-            Write-Error "RDP is not listening on port 3389."
-            exit 1
+          if ($rdpPort) {
+              Write-Host "RDP port 3389 is listening."
+          }
+          else {
+              Write-Host "RDP port 3389 is not listening."
+              exit 1
           }
 
-          Write-Host ""
-          Write-Host "================================"
-          Write-Host "RDP CREATED SUCCESSFULLY"
-          Write-Host "================================"
-          Write-Host "RDP service: RUNNING"
-          Write-Host "Port 3389: LISTENING"
-          Write-Host "================================"
-
-      - name: Keep RDP Running
+      - name: Show RDP Details
         shell: powershell
         run: |
-          Write-Host "RDP test is running."
-
-          Start-Sleep -Seconds 1800
-  run: |
           Write-Host ""
-          Write-Host "RDP test runner will remain active."
-          Write-Host "The GitHub-hosted runner will be destroyed"
-          Write-Host "when this workflow finishes."
-          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "            RDP DETAILS"
+          Write-Host "======================================"
+          Write-Host "Username : $env:RDP_USERNAME"
+          Write-Host "Password : $env:RDP_PASSWORD"
+          Write-Host "Port     : 3389"
+          Write-Host "======================================"
 
+      - name: Keep Runner Alive
+        shell: powershell
+        run: |
+          Write-Host "RDP test runner will stay online for 30 minutes."
           Start-Sleep -Seconds 1800
