@@ -1,0 +1,105 @@
+name: ATP RDP Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp-test:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Configure Windows RDP
+        shell: powershell
+        run: |
+          Write-Host "======================================"
+          Write-Host "       CONFIGURING WINDOWS RDP"
+          Write-Host "======================================"
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0 `
+            -Force
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 1 `
+            -Force
+
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          Set-Service -Name "TermService" -StartupType Automatic
+          Start-Service -Name "TermService"
+
+          Write-Host "RDP configuration completed."
+
+      - name: Create RDP User
+        shell: powershell
+        run: |
+          $username = "atp"
+
+          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+          $password = -join (1..20 | ForEach-Object {
+              $chars[(Get-Random -Maximum $chars.Length)]
+          })
+
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              Remove-LocalUser -Name $username
+          }
+
+          New-LocalUser `
+            -Name $username `
+            -Password $securePassword `
+            -PasswordNeverExpires:$true `
+            -AccountNeverExpires:$true
+
+          Add-LocalGroupMember -Group "Administrators" -Member $username
+
+          "RDP_USERNAME=$username" >> $env:GITHUB_ENV
+          "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
+
+          Write-Host "RDP user created."
+
+      - name: Verify RDP
+        shell: powershell
+        run: |
+          Write-Host "======================================"
+          Write-Host "          VERIFYING RDP"
+          Write-Host "======================================"
+
+          Get-Service TermService
+
+          $rdpPort = Get-NetTCPConnection `
+            -LocalPort 3389 `
+            -State Listen `
+            -ErrorAction SilentlyContinue
+
+          if ($rdpPort) {
+              Write-Host "RDP port 3389 is listening."
+          }
+          else {
+              Write-Host "RDP port 3389 is not listening."
+              exit 1
+          }
+
+      - name: Show RDP Details
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "            RDP DETAILS"
+          Write-Host "======================================"
+          Write-Host "Username : $env:RDP_USERNAME"
+          Write-Host "Password : $env:RDP_PASSWORD"
+          Write-Host "Port     : 3389"
+          Write-Host "======================================"
+
+      - name: Keep Runner Alive
+        shell: powershell
+        run: |
+          Write-Host "RDP test runner will stay online for 30 minutes."
+          Start-Sleep -Seconds 1800
