@@ -28,75 +28,65 @@ jobs:
             -Value 1 `
             -Force
 
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+name: Tailscale Free RDP Server
 
-          Set-Service -Name "TermService" -StartupType Automatic
-          Start-Service -Name "TermService"
+on:
+  workflow_dispatch: # Allows you to turn it on manually from your phone
 
-          Write-Host "RDP configuration completed."
+jobs:
+  build-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360 # Keeps the server running for up to 6 hours max
 
-      - name: Create RDP User
-        shell: powershell
-        run: |
-          $username = "atp"
+    steps:
+    - name: Download and Install Tailscale
+      run: |
+        $tsUrl = "https://tailscale.com"
+        $installerPath = "$env:TEMP\tailscale-setup.exe"
+        Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+        Start-Process $installerPath -ArgumentList "/quiet", "/norestart" -Wait
+        Remove-Item $installerPath -Force
 
-          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
-          $password = -join (1..20 | ForEach-Object {
-              $chars[(Get-Random -Maximum $chars.Length)]
-          })
+    - name: Connect to Tailscale Network
+      run: |
+        & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --hostname=github-free-rdp
 
-          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+    - name: Create Windows Login Credentials
+      run: |
+        # Creates a secure username: CloudUser and dynamic Password
+        $Password = "FreeRDPPass2026!"
+        $User = "CloudUser"
+        $SecPassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        New-LocalUser -Name $User -Password $SecPassword -Description "RDP Account"
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member $User
+        Add-LocalGroupMember -Group "Administrators" -Member $User
 
-          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              Remove-LocalUser -Name $username
-          }
+    - name: Enable Remote Desktop Services
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-          New-LocalUser `
-            -Name $username `
-            -Password $securePassword `
-            -PasswordNeverExpires:$true `
-            -AccountNeverExpires:$true
+    - name: Show Connection Details
+      run: |
+        $tsIP = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4)
+        Write-Host "============================================="
+        Write-Host "           RDP SERVER IS READY               "
+        Write-Host "============================================="
+        Write-Host " IP ADDRESS : $tsIP"
+        Write-Host " USERNAME   : CloudUser"
+        Write-Host " PASSWORD   : FreeRDPPass2026!"
+        Write-Host "============================================="
 
-          Add-LocalGroupMember -Group "Administrators" -Member $username
+    - name: Keep Virtual Machine Active
+      run: |
+        # Loop prevents the server from closing down instantly
+        $timeout = New-TimeSpan -Minutes 350
+        $sw = [diagnostics.stopwatch]::StartNew()
+        while ($sw.elapsed -lt $timeout) {
+            Start-Sleep -Seconds 60
+        }
 
-          "RDP_USERNAME=$username" >> $env:GITHUB_ENV
-          "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
-
-          Write-Host "RDP user created."
-
-      - name: Verify RDP
-        shell: powershell
-        run: |
-          Write-Host "======================================"
-          Write-Host "          VERIFYING RDP"
-          Write-Host "======================================"
-
-          Get-Service TermService
-
-          $rdpPort = Get-NetTCPConnection `
-            -LocalPort 3389 `
-            -State Listen `
-            -ErrorAction SilentlyContinue
-
-          if ($rdpPort) {
-              Write-Host "RDP port 3389 is listening."
-          }
-          else {
-              Write-Host "RDP port 3389 is not listening."
-              exit 1
-          }
-
-      - name: Show RDP Details
-        shell: powershell
-        run: |
-          Write-Host ""
-          Write-Host "======================================"
-          Write-Host "            RDP DETAILS"
-          Write-Host "======================================"
-          Write-Host "Username : $env:RDP_USERNAME"
-          Write-Host "Password : $env:RDP_PASSWORD"
-          Write-Host "Port     : 3389"
-          Write-Host "======================================"
+================================"
 
       - name: Keep Runner Alive
         shell: powershell
