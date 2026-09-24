@@ -10,7 +10,6 @@ jobs:
     timeout-minutes: 360 
 
     steps:
-    # Official Tailscale Action automatically downloads, installs, and connects safely on Windows
     - name: Connect Tailscale Network
       uses: tailscale/github-action@v3
       with:
@@ -26,14 +25,17 @@ jobs:
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member $User
         Add-LocalGroupMember -Group "Administrators" -Member $User
 
-    - name: Enable Remote Desktop Services
+    - name: Enable Remote Desktop Services & Bypass Firewall
       run: |
+        # Turn on RDP connections
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        
+        # FIX: Force the system firewall to open RDP port 3389 for Public and Private networks
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        New-NetFirewallRule -DisplayName "Allow RDP Tailscale" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow -Profile Any -Force
 
     - name: Show Connection Details
       run: |
-        # Pull the valid internal Tailscale IP directly 
         $tsIP = (tailscale ip -4)
         Write-Host "============================================="
         Write-Host "           RDP SERVER IS READY               "
