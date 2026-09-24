@@ -1,21 +1,21 @@
 name: Tailscale Free RDP Server
 
 on:
-  push:             # <-- This forces it to start automatically on every code commit!
-  workflow_dispatch: 
+  push:             # Forces the workflow to run immediately when you save this
+  workflow_dispatch: # Allows manual starting from your mobile phone
 
 jobs:
   build-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 # Keeps the server running for up to 6 hours max
+    timeout-minutes: 360 
 
     steps:
-    - name: Download and Install Tailscale
+    - name: Download and Install Tailscale (MSI Fix)
       run: |
         $tsUrl = "https://tailscale.com"
-        $installerPath = "$env:TEMP\tailscale-setup.exe"
+        $installerPath = "$env:TEMP\tailscale-setup.msi"
         Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-        Start-Process $installerPath -ArgumentList "/quiet", "/norestart" -Wait
+        Start-Process msiexec.exe -ArgumentList "/i", $installerPath, "/qn", "/norestart" -Wait
         Remove-Item $installerPath -Force
 
     - name: Connect to Tailscale Network
@@ -24,7 +24,6 @@ jobs:
 
     - name: Create Windows Login Credentials
       run: |
-        # Creates a secure username: CloudUser and dynamic Password
         $Password = "FreeRDPPass2026!"
         $User = "CloudUser"
         $SecPassword = ConvertTo-SecureString $Password -AsPlainText -Force
@@ -50,7 +49,6 @@ jobs:
 
     - name: Keep Virtual Machine Active
       run: |
-        # Loop prevents the server from closing down instantly
         $timeout = New-TimeSpan -Minutes 350
         $sw = [diagnostics.stopwatch]::StartNew()
         while ($sw.elapsed -lt $timeout) {
