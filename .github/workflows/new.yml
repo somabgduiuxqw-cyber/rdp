@@ -1,4 +1,4 @@
-name: Tailscale Free RD
+name: Tailscale Free R
 
 on:
   push:             
