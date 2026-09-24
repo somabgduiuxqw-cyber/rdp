@@ -1,4 +1,4 @@
-name: Tailscale Free RDP Server
+name: Tailscale Free RD
 
 on:
   push:             
