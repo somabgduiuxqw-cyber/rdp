@@ -5,50 +5,99 @@ on:
   workflow_dispatch: 
 
 jobs:
-  build-rdp:
+  secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 
+    timeout-minutes: 3600
 
     steps:
-    - name: Connect Tailscale Network
-      uses: tailscale/github-action@v3
-      with:
-        authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        version: latest
+      - name: Configure RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0 -Force
 
-    - name: Create Windows Login Credentials
-      run: |
-        $Password = "FreeRDPPass2026!"
-        $User = "CloudUser"
-        $SecPassword = ConvertTo-SecureString $Password -AsPlainText -Force
-        New-LocalUser -Name $User -Password $SecPassword -Description "RDP Account"
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member $User
-        Add-LocalGroupMember -Group "Administrators" -Member $User
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "UserAuthentication" -Value 1 -Force
 
-    - name: Enable Remote Desktop Services & Bypass Firewall
-      run: |
-        # Turn on RDP connections
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-        
-        # FIX: Force the system firewall to open RDP port 3389 for Public and Private networks
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        New-NetFirewallRule -DisplayName "Allow RDP Tailscale" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow -Profile Any -Force
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Restart-Service -Name TermService -Force
 
-    - name: Show Connection Details
-      run: |
-        $tsIP = (tailscale ip -4)
-        Write-Host "============================================="
-        Write-Host "           RDP SERVER IS READY               "
-        Write-Host "============================================="
-        Write-Host " IP ADDRESS : $tsIP"
-        Write-Host " USERNAME   : CloudUser"
-        Write-Host " PASSWORD   : FreeRDPPass2026!"
-        Write-Host "============================================="
+      - name: Configure Runner Admin Password
+        run: |
+          $password = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $password
 
-    - name: Keep Virtual Machine Active
-      run: |
-        $timeout = New-TimeSpan -Minutes 350
-        $sw = [diagnostics.stopwatch]::StartNew()
-        while ($sw.elapsed -lt $timeout) {
-            Start-Sleep -Seconds 60
-        }
+      - name: Install Tailscale
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installer = "$env:TEMP\tailscale.msi"
+
+          Invoke-WebRequest -Uri $url -OutFile $installer
+
+          Start-Process msiexec.exe `
+            -ArgumentList "/i", "`"$installer`"", "/quiet", "/norestart" `
+            -Wait
+
+          Remove-Item $installer -Force
+
+      - name: Connect Tailscale
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          & $tailscale up `
+            --authkey="$env:TAILSCALE_AUTH_KEY" `
+            --hostname="infinite-rdp-$env:GITHUB_RUN_ID"
+
+          $tsIP = $null
+
+          for ($i = 1; $i -le 12; $i++) {
+            Start-Sleep -Seconds 5
+            $tsIP = (& $tailscale ip -4 2>$null | Select-Object -First 1).Trim()
+
+            if ($tsIP) {
+              break
+            }
+          }
+
+          if (-not $tsIP) {
+            Write-Error "Tailscale IP was not assigned."
+            exit 1
+          }
+
+          "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Verify RDP
+        run: |
+          Write-Host "Testing RDP on $env:TAILSCALE_IP..."
+
+          $result = Test-NetConnection `
+            -ComputerName $env:TAILSCALE_IP `
+            -Port 3389 `
+            -InformationLevel Quiet
+
+          if (-not $result) {
+            Write-Error "RDP port 3389 is not reachable."
+            exit 1
+          }
+
+          Write-Host "RDP connection is ready."
+
+      - name: Show RDP Details
+        run: |
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "       INFINITE RDP - TAILSCALE"
+          Write-Host "========================================"
+          Write-Host "Address  : $env:TAILSCALE_IP"
+          Write-Host "Username : runneradmin"
+          Write-Host "Password : P@ssw0rd!"
+          Write-Host "========================================"
+          Write-Host ""
+
+      - name: Keep RDP Alive
+        run: |
+          while ($true) {
+            Write-Host "[$(Get-Date)] INFINITE RDP is active..."
+            Start-Sleep -Seconds 300
+          }
