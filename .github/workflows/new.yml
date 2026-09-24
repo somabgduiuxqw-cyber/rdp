@@ -1,7 +1,8 @@
 name: Tailscale Free RDP Server
 
 on:
-  workflow_dispatch: # Allows you to turn it on manually from your phone
+  push:             # <-- This forces it to start automatically on every code commit!
+  workflow_dispatch: 
 
 jobs:
   build-rdp:
