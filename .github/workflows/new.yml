@@ -10,28 +10,12 @@ jobs:
     timeout-minutes: 360 
 
     steps:
-    - name: Download and Install Tailscale (MSI Fix)
-      run: |
-        $tsUrl = "https://tailscale.com"
-        $installerPath = "$env:TEMP\tailscale-setup.msi"
-        Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-        Start-Process msiexec.exe -ArgumentList "/i", $installerPath, "/qn", "/norestart" -Wait
-        Remove-Item $installerPath -Force
-        # Force Windows to reload environment variables
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-
-    - name: Connect to Tailscale Network
-      run: |
-        # Fallback logic to find the exact executable path if standard path fails
-        $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
-        if (-not (Test-Path $tsPath)) {
-            $tsPath = (Get-Command tailscale.exe -ErrorAction SilentlyContinue).Source
-        }
-        if (-not $tsPath) {
-            Write-Error "Tailscale installation folder could not be located."
-            exit 1
-        }
-        & $tsPath up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --hostname=github-free-rdp
+    # Official Tailscale Action automatically downloads, installs, and connects safely on Windows
+    - name: Connect Tailscale Network
+      uses: tailscale/github-action@v3
+      with:
+        authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        version: latest
 
     - name: Create Windows Login Credentials
       run: |
@@ -49,9 +33,8 @@ jobs:
 
     - name: Show Connection Details
       run: |
-        $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
-        if (-not (Test-Path $tsPath)) { $tsPath = "tailscale" }
-        $tsIP = (& $tsPath ip -4)
+        # Pull the valid internal Tailscale IP directly 
+        $tsIP = (tailscale ip -4)
         Write-Host "============================================="
         Write-Host "           RDP SERVER IS READY               "
         Write-Host "============================================="
