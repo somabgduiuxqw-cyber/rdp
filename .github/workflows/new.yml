@@ -1,4 +1,4 @@
-name: Tailscale Free R
+name: atp
 
 on:
   push:             
